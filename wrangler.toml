@@ -6,6 +6,11 @@ compatibility_flags = ["nodejs_compat_v2"]
 # Browser Rendering binding for PDF generation
 browser = { binding = "BROWSER" }
 
+# Send email binding for notifications
+send_email = [
+  { name = "SEND_EMAIL", destination_address = "chi@desertservices.net" }
+]
+
 # Observability
 [observability]
 enabled = true

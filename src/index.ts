@@ -8,20 +8,17 @@
  * Worker: inspection-router.cheez2012.workers.dev
  */
 
+import { EmailMessage } from "cloudflare:email";
 import puppeteer from "@cloudflare/puppeteer";
-
-// =============================================================================
-// Top-level regex patterns (for performance)
-// =============================================================================
-
-const SITE_NAME_HTML_REGEX =
-  /Site\/Location Name:<\/span>\s*<span[^>]*>([^<]+)<\/span>/i;
-const SITE_NAME_TEXT_REGEX = /Site\/Location Name:\s*([^\r\n]+)/i;
-const SITE_ADDRESS_REGEX =
-  /Site\/Location Address:<\/span>\s*<a[^>]*>(?:<span[^>]*>)?([^<]+)/i;
-const REPORT_URL_REGEX =
-  /href="(https:\/\/cdn3\.compliancego\.com\/[^"]+\.html)"/i;
-const DATE_FROM_URL_REGEX = /(\d{1,2})([A-Za-z]{3})(\d{2})-/;
+import {
+  formatFilename,
+  type InspectionData,
+  parseComplianceGoEmail,
+  parseRawEmail,
+  parseSiteName,
+  shouldProcessEmail,
+  siteNameToSharePointPath,
+} from "./parser";
 
 // =============================================================================
 // Types
@@ -31,17 +28,24 @@ export interface Env {
   // Browser Rendering binding
   BROWSER: Fetcher;
 
+  // Send email binding for notifications
+  SEND_EMAIL: SendEmail;
+
   // Azure/SharePoint credentials
   AZURE_TENANT_ID: string;
   AZURE_CLIENT_ID: string;
   AZURE_CLIENT_SECRET: string;
 }
 
-interface InspectionData {
+interface NotificationData {
+  success: boolean;
   siteName: string;
-  siteAddress: string;
-  reportUrl: string;
-  inspectionDate: Date;
+  contractor: string;
+  project: string;
+  fileName: string;
+  folderPath: string;
+  sharePointUrl?: string;
+  error?: string;
 }
 
 interface SharePointResult {
@@ -61,31 +65,39 @@ export default {
     ctx: ExecutionContext
   ) {
     const from = message.from;
-    const to = message.to;
     const subject = message.headers.get("subject") ?? "";
+
+    // Forward destination (verified in Cloudflare)
+    const forwardTo = "chi@desertservices.net";
 
     console.log(`[Worker] Email from: ${from}`);
     console.log(`[Worker] Subject: ${subject}`);
 
-    // Only process ComplianceGo inspection emails
-    if (!isComplianceGoEmail(from, subject)) {
-      console.log("[Worker] Not a ComplianceGo inspection, forwarding");
-      await message.forward(to);
-      return;
-    }
-
-    console.log("[Worker] ComplianceGo inspection detected!");
-
-    // Parse email in try block, always forward
     try {
-      const rawEmail = await streamToString(message.raw);
-      const inspection = parseComplianceGoEmail(rawEmail);
-
-      if (!inspection) {
-        console.error("[Worker] Failed to parse inspection data");
-        await message.forward(to);
+      // Check if sender is allowed to trigger inspection processing
+      if (!shouldProcessEmail(from)) {
+        console.log("[Worker] Not from allowed sender, forwarding");
+        await message.forward(forwardTo);
         return;
       }
+
+      // Read and decode raw MIME email
+      const rawEmailBuffer = await streamToArrayBuffer(message.raw);
+      const decoded = await parseRawEmail(rawEmailBuffer);
+
+      console.log(
+        `[Worker] Decoded email - HTML: ${decoded.html.length} chars, Text: ${decoded.text.length} chars`
+      );
+
+      const inspection = parseComplianceGoEmail(decoded.html, decoded.text);
+
+      if (!inspection) {
+        console.log("[Worker] No ComplianceGo report URL found, forwarding");
+        await message.forward(forwardTo);
+        return;
+      }
+
+      console.log("[Worker] ComplianceGo inspection detected!");
 
       console.log(`[Worker] Site: ${inspection.siteName}`);
       console.log(`[Worker] Date: ${inspection.inspectionDate.toISOString()}`);
@@ -98,11 +110,16 @@ export default {
         )
       );
 
-      await message.forward(to);
-      console.log(`[Worker] Email forwarded to: ${to}`);
+      await message.forward(forwardTo);
+      console.log(`[Worker] Email forwarded to: ${forwardTo}`);
     } catch (error) {
       console.error(`[Worker] Error: ${error}`);
-      await message.forward(to);
+      // Try to forward even on error
+      try {
+        await message.forward(forwardTo);
+      } catch (forwardError) {
+        console.error(`[Worker] Forward also failed: ${forwardError}`);
+      }
     }
   },
 };
@@ -115,29 +132,78 @@ async function processInspection(
   env: Env,
   inspection: InspectionData
 ): Promise<void> {
-  // 1. Generate PDF from ComplianceGo report
-  console.log("[Worker] Generating PDF...");
-  const pdfBuffer = await generatePdf(env, inspection.reportUrl);
-  console.log(`[Worker] PDF generated: ${pdfBuffer.byteLength} bytes`);
-
-  // 2. Upload to SharePoint
-  console.log("[Worker] Uploading to SharePoint...");
-  const folderPath = siteNameToSharePointPath(inspection.siteName);
+  const year = inspection.inspectionDate.getFullYear();
+  const folderPath = siteNameToSharePointPath(inspection.siteName, year);
   const fileName = formatFilename(inspection.inspectionDate);
+  const parsed = parseSiteName(inspection.siteName);
+  const contractor = parsed?.contractor ?? "UNKNOWN";
+  const project = parsed?.project ?? "UNKNOWN";
 
   if (!folderPath) {
     console.error(
       `[Worker] Could not determine folder for: ${inspection.siteName}`
     );
+    await sendNotification(env, {
+      success: false,
+      siteName: inspection.siteName,
+      contractor,
+      project,
+      fileName,
+      folderPath: "N/A",
+      error: "Could not determine SharePoint folder path",
+    });
     return;
   }
 
-  const result = await uploadToSharePoint(env, folderPath, fileName, pdfBuffer);
+  try {
+    // 1. Generate PDF from ComplianceGo report
+    console.log("[Worker] Generating PDF...");
+    const pdfBuffer = await generatePdf(env, inspection.reportUrl);
+    console.log(`[Worker] PDF generated: ${pdfBuffer.byteLength} bytes`);
 
-  if (result.success) {
-    console.log(`[Worker] Uploaded: ${result.webUrl}`);
-  } else {
-    console.error(`[Worker] Upload failed: ${result.error}`);
+    // 2. Upload to SharePoint
+    console.log("[Worker] Uploading to SharePoint...");
+    const result = await uploadToSharePoint(
+      env,
+      folderPath,
+      fileName,
+      pdfBuffer
+    );
+
+    if (result.success) {
+      console.log(`[Worker] Uploaded: ${result.webUrl}`);
+      await sendNotification(env, {
+        success: true,
+        siteName: inspection.siteName,
+        contractor,
+        project,
+        fileName,
+        folderPath,
+        sharePointUrl: result.webUrl,
+      });
+    } else {
+      console.error(`[Worker] Upload failed: ${result.error}`);
+      await sendNotification(env, {
+        success: false,
+        siteName: inspection.siteName,
+        contractor,
+        project,
+        fileName,
+        folderPath,
+        error: result.error,
+      });
+    }
+  } catch (error) {
+    console.error(`[Worker] Processing error: ${error}`);
+    await sendNotification(env, {
+      success: false,
+      siteName: inspection.siteName,
+      contractor,
+      project,
+      fileName,
+      folderPath,
+      error: String(error),
+    });
   }
 }
 
@@ -254,104 +320,73 @@ async function getGraphToken(env: Env): Promise<string> {
 }
 
 // =============================================================================
-// Email Parsing
+// Email Notifications
 // =============================================================================
 
-function isComplianceGoEmail(from: string, subject: string): boolean {
-  return (
-    from.toLowerCase().includes("compliancego.com") &&
-    subject.toLowerCase().includes("inspection report")
-  );
-}
+async function sendNotification(
+  env: Env,
+  data: NotificationData
+): Promise<void> {
+  const status = data.success ? "SUCCESS" : "FAILED";
+  const subject = `[Inspection ${status}] ${data.contractor} - ${data.project}`;
 
-function parseComplianceGoEmail(content: string): InspectionData | null {
-  // Extract site name
-  const siteMatch = content.match(SITE_NAME_HTML_REGEX);
-  let siteName = siteMatch?.[1]?.trim();
+  const body = data.success
+    ? `Inspection report processed successfully!
 
-  if (!siteName) {
-    const altMatch = content.match(SITE_NAME_TEXT_REGEX);
-    siteName = altMatch?.[1]?.trim();
+Contractor: ${data.contractor}
+Project: ${data.project}
+File: ${data.fileName}
+Path: ${data.folderPath}
+
+SharePoint URL: ${data.sharePointUrl}
+`
+    : `Inspection report processing failed.
+
+Contractor: ${data.contractor}
+Project: ${data.project}
+Site Name: ${data.siteName}
+File: ${data.fileName}
+Path: ${data.folderPath}
+
+Error: ${data.error}
+`;
+
+  try {
+    const messageId = `${Date.now()}.${crypto.randomUUID()}@desertservices.app`;
+    const date = new Date().toUTCString();
+
+    // RFC 5322 formatted email
+    const rawEmail = [
+      `From: "Inspection Router" <inspections@desertservices.app>`,
+      "To: chi@desertservices.net",
+      `Subject: ${subject}`,
+      `Date: ${date}`,
+      `Message-ID: <${messageId}>`,
+      "MIME-Version: 1.0",
+      "Content-Type: text/plain; charset=UTF-8",
+      "",
+      body,
+    ].join("\r\n");
+
+    const message = new EmailMessage(
+      "inspections@desertservices.app",
+      "chi@desertservices.net",
+      rawEmail
+    );
+    await env.SEND_EMAIL.send(message);
+    console.log(`[Worker] Notification sent: ${subject}`);
+  } catch (error) {
+    console.error(`[Worker] Failed to send notification: ${error}`);
   }
-
-  if (!siteName) {
-    return null;
-  }
-
-  // Extract address
-  const addrMatch = content.match(SITE_ADDRESS_REGEX);
-  const siteAddress = addrMatch?.[1]?.trim() ?? "";
-
-  // Extract report URL
-  const urlMatch = content.match(REPORT_URL_REGEX);
-  const reportUrl = urlMatch?.[1];
-
-  if (!reportUrl) {
-    return null;
-  }
-
-  // Parse date from URL: IR_Arco-KtecPhx_21Jan26-11:36AM_uuid.html
-  const dateMatch = reportUrl.match(DATE_FROM_URL_REGEX);
-  let inspectionDate = new Date();
-
-  if (dateMatch) {
-    const day = Number.parseInt(dateMatch[1], 10);
-    const monthStr = dateMatch[2];
-    const year = 2000 + Number.parseInt(dateMatch[3], 10);
-    const monthMap: Record<string, number> = {
-      Jan: 0,
-      Feb: 1,
-      Mar: 2,
-      Apr: 3,
-      May: 4,
-      Jun: 5,
-      Jul: 6,
-      Aug: 7,
-      Sep: 8,
-      Oct: 9,
-      Nov: 10,
-      Dec: 11,
-    };
-    inspectionDate = new Date(year, monthMap[monthStr] ?? 0, day, 12, 0, 0);
-  }
-
-  return { siteName, siteAddress, reportUrl, inspectionDate };
-}
-
-// =============================================================================
-// SharePoint Path Helpers
-// =============================================================================
-
-function siteNameToSharePointPath(siteName: string): string | null {
-  // "ARCO - KTEC PHX" -> "SWPPP/INSPECTIONS/PROJECTS/PROJECTS A-M/ARCO/KTEC PHX"
-  const parts = siteName.split(" - ");
-  if (parts.length < 2) {
-    return null;
-  }
-
-  const contractor = parts[0].trim().toUpperCase();
-  const project = parts.slice(1).join(" - ").trim();
-  const firstLetter = contractor.charAt(0);
-  const folder =
-    firstLetter >= "A" && firstLetter <= "M" ? "PROJECTS A-M" : "PROJECTS N-Z";
-
-  return `SWPPP/INSPECTIONS/PROJECTS/${folder}/${contractor}/${project}`;
-}
-
-function formatFilename(date: Date): string {
-  const mm = String(date.getMonth() + 1).padStart(2, "0");
-  const dd = String(date.getDate()).padStart(2, "0");
-  const yy = String(date.getFullYear()).slice(-2);
-  return `${mm}.${dd}.${yy}.pdf`;
 }
 
 // =============================================================================
 // Utilities
 // =============================================================================
 
-async function streamToString(
+async function streamToArrayBuffer(
   stream: ReadableStream<Uint8Array>
-): Promise<string> {
+): Promise<ArrayBuffer> {
   const reader = stream.getReader();
   const chunks: Uint8Array[] = [];
 
@@ -373,5 +408,5 @@ async function streamToString(
     offset += c.length;
   }
 
-  return new TextDecoder().decode(combined);
+  return combined.buffer;
 }

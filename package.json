@@ -1,0 +1,20 @@
+{
+  "name": "ds-inspections-email-worker",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev --remote",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "dependencies": {
+    "@cloudflare/puppeteer": "^1.0.5"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.3.11",
+    "@cloudflare/workers-types": "^4.20260120.0",
+    "typescript": "^5.9.3",
+    "ultracite": "7.0.12",
+    "wrangler": "^4.59.3"
+  }
+}

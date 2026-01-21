@@ -1,0 +1,19 @@
+name = "inspection-router"
+main = "src/index.ts"
+compatibility_date = "2026-01-21"
+compatibility_flags = ["nodejs_compat_v2"]
+
+# Browser Rendering binding for PDF generation
+browser = { binding = "BROWSER" }
+
+# Observability
+[observability]
+enabled = true
+
+# Email routing address: inspections@desertservices.app
+# Workers.dev URL: inspection-router.cheez2012.workers.dev
+
+# Secrets (set via dashboard or `wrangler secret put`):
+# - AZURE_TENANT_ID
+# - AZURE_CLIENT_ID
+# - AZURE_CLIENT_SECRET

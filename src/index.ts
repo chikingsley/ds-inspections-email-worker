@@ -59,6 +59,68 @@ interface SharePointResult {
 // =============================================================================
 
 export default {
+  // HTTP handler for testing
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url);
+
+    // Test endpoint: /test-email?type=success or /test-email?type=failure
+    if (url.pathname === "/test-email") {
+      const type = url.searchParams.get("type") ?? "success";
+
+      const testData: NotificationData = {
+        success: type === "success",
+        siteName: "ARCO - KTEC PHX",
+        contractor: "ARCO",
+        project: "KTEC PHX",
+        fileName: "01.22.26.pdf",
+        folderPath:
+          "SWPPP/INSPECTIONS/PROJECTS/PROJECTS A-M/ARCO/KTEC PHX/2026",
+        sharePointUrl:
+          "https://desertservices.sharepoint.com/sites/DataDrive/Shared%20Documents/SWPPP/INSPECTIONS/PROJECTS/PROJECTS%20A-M/ARCO/KTEC%20PHX/2026",
+        error:
+          type === "failure"
+            ? "Test error: Could not connect to SharePoint"
+            : undefined,
+      };
+
+      await sendNotification(env, testData);
+
+      return new Response(`Test ${type} email sent to chi@desertservices.net`, {
+        headers: { "Content-Type": "text/plain" },
+      });
+    }
+
+    // Preview endpoint: /preview?type=success or /preview?type=failure
+    if (url.pathname === "/preview") {
+      const type = url.searchParams.get("type") ?? "success";
+
+      const testData: NotificationData = {
+        success: type === "success",
+        siteName: "ARCO - KTEC PHX",
+        contractor: "ARCO",
+        project: "KTEC PHX",
+        fileName: "01.22.26.pdf",
+        folderPath:
+          "SWPPP/INSPECTIONS/PROJECTS/PROJECTS A-M/ARCO/KTEC PHX/2026",
+        sharePointUrl:
+          "https://desertservices.sharepoint.com/sites/DataDrive/Shared%20Documents/SWPPP/INSPECTIONS/PROJECTS/PROJECTS%20A-M/ARCO/KTEC%20PHX/2026",
+        error:
+          type === "failure"
+            ? "Test error: Could not connect to SharePoint"
+            : undefined,
+      };
+
+      return new Response(buildNotificationHtml(testData), {
+        headers: { "Content-Type": "text/html" },
+      });
+    }
+
+    return new Response("Inspection Router Worker", {
+      headers: { "Content-Type": "text/plain" },
+    });
+  },
+
+  // Email handler
   async email(
     message: ForwardableEmailMessage,
     env: Env,
@@ -289,7 +351,12 @@ async function uploadToSharePoint(
     }
 
     const uploadData = (await uploadRes.json()) as { webUrl: string };
-    return { success: true, webUrl: uploadData.webUrl };
+    // Return folder URL (strip filename) so user can verify file is there
+    const folderUrl = uploadData.webUrl.substring(
+      0,
+      uploadData.webUrl.lastIndexOf("/")
+    );
+    return { success: true, webUrl: folderUrl };
   } catch (error) {
     return { success: false, error: String(error) };
   }
@@ -323,39 +390,110 @@ async function getGraphToken(env: Env): Promise<string> {
 // Email Notifications
 // =============================================================================
 
+function buildNotificationHtml(data: NotificationData): string {
+  if (data.success) {
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }
+    .header { background: #10b981; color: white; padding: 20px; border-radius: 8px 8px 0 0; }
+    .content { background: #f9fafb; padding: 20px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px; }
+    .field { margin-bottom: 12px; }
+    .label { font-weight: 600; color: #6b7280; font-size: 12px; text-transform: uppercase; }
+    .value { font-size: 16px; margin-top: 2px; }
+    .btn { display: inline-block; background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin-top: 16px; }
+    .btn:hover { background: #1d4ed8; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h2 style="margin:0;">Inspection Uploaded Successfully</h2>
+  </div>
+  <div class="content">
+    <div class="field">
+      <div class="label">Contractor</div>
+      <div class="value">${data.contractor}</div>
+    </div>
+    <div class="field">
+      <div class="label">Project</div>
+      <div class="value">${data.project}</div>
+    </div>
+    <div class="field">
+      <div class="label">File</div>
+      <div class="value">${data.fileName}</div>
+    </div>
+    <div class="field">
+      <div class="label">Folder</div>
+      <div class="value">${data.folderPath}</div>
+    </div>
+    <a href="${data.sharePointUrl}" class="btn">View Folder in SharePoint</a>
+  </div>
+</body>
+</html>`;
+  }
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }
+    .header { background: #ef4444; color: white; padding: 20px; border-radius: 8px 8px 0 0; }
+    .content { background: #f9fafb; padding: 20px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px; }
+    .field { margin-bottom: 12px; }
+    .label { font-weight: 600; color: #6b7280; font-size: 12px; text-transform: uppercase; }
+    .value { font-size: 16px; margin-top: 2px; }
+    .error { background: #fef2f2; border: 1px solid #fecaca; padding: 12px; border-radius: 6px; color: #991b1b; margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h2 style="margin:0;">Inspection Upload Failed</h2>
+  </div>
+  <div class="content">
+    <div class="field">
+      <div class="label">Contractor</div>
+      <div class="value">${data.contractor}</div>
+    </div>
+    <div class="field">
+      <div class="label">Project</div>
+      <div class="value">${data.project}</div>
+    </div>
+    <div class="field">
+      <div class="label">Site Name</div>
+      <div class="value">${data.siteName}</div>
+    </div>
+    <div class="field">
+      <div class="label">File</div>
+      <div class="value">${data.fileName}</div>
+    </div>
+    <div class="field">
+      <div class="label">Folder</div>
+      <div class="value">${data.folderPath}</div>
+    </div>
+    <div class="error">
+      <strong>Error:</strong> ${data.error}
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
 async function sendNotification(
   env: Env,
   data: NotificationData
 ): Promise<void> {
   const status = data.success ? "SUCCESS" : "FAILED";
   const subject = `[Inspection ${status}] ${data.contractor} - ${data.project}`;
-
-  const body = data.success
-    ? `Inspection report processed successfully!
-
-Contractor: ${data.contractor}
-Project: ${data.project}
-File: ${data.fileName}
-Path: ${data.folderPath}
-
-SharePoint URL: ${data.sharePointUrl}
-`
-    : `Inspection report processing failed.
-
-Contractor: ${data.contractor}
-Project: ${data.project}
-Site Name: ${data.siteName}
-File: ${data.fileName}
-Path: ${data.folderPath}
-
-Error: ${data.error}
-`;
+  const htmlBody = buildNotificationHtml(data);
 
   try {
     const messageId = `${Date.now()}.${crypto.randomUUID()}@desertservices.app`;
     const date = new Date().toUTCString();
 
-    // RFC 5322 formatted email
+    // RFC 5322 formatted email with HTML content
     const rawEmail = [
       `From: "Inspection Router" <inspections@desertservices.app>`,
       "To: chi@desertservices.net",
@@ -363,9 +501,9 @@ Error: ${data.error}
       `Date: ${date}`,
       `Message-ID: <${messageId}>`,
       "MIME-Version: 1.0",
-      "Content-Type: text/plain; charset=UTF-8",
+      "Content-Type: text/html; charset=UTF-8",
       "",
-      body,
+      htmlBody,
     ].join("\r\n");
 
     const message = new EmailMessage(

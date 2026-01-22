@@ -215,9 +215,9 @@ describe("parseSiteName", () => {
     expect(result?.project).toBe("ATLAS-KEIRLAND-PHASE2");
   });
 
-  it("uppercases the contractor name", () => {
+  it("preserves original contractor name case", () => {
     const result = parseSiteName("arco - Some Project");
-    expect(result?.contractor).toBe("ARCO");
+    expect(result?.contractor).toBe("arco");
   });
 });
 

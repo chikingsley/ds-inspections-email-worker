@@ -9,7 +9,9 @@
     "test": "bun test"
   },
   "dependencies": {
+    "@azure/identity": "^4.13.0",
     "@cloudflare/puppeteer": "^1.0.5",
+    "@microsoft/microsoft-graph-client": "^3.0.7",
     "postal-mime": "^2.7.3"
   },
   "devDependencies": {

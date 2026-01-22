@@ -167,7 +167,7 @@ export function parseSiteName(
   let parts = siteName.split(" - ");
   if (parts.length >= 2) {
     return {
-      contractor: parts[0].trim().toUpperCase(),
+      contractor: parts[0].trim(),
       project: parts.slice(1).join(" - ").trim(),
     };
   }
@@ -176,7 +176,7 @@ export function parseSiteName(
   parts = siteName.split("-");
   if (parts.length >= 2) {
     return {
-      contractor: parts[0].trim().toUpperCase(),
+      contractor: parts[0].trim(),
       project: parts.slice(1).join("-").trim(),
     };
   }

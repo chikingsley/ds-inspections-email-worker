@@ -273,23 +273,58 @@ async function processInspection(
 // PDF Generation (Browser Rendering)
 // =============================================================================
 
+const MAX_PDF_RETRIES = 3;
+
 async function generatePdf(env: Env, url: string): Promise<Uint8Array> {
-  const browser = await puppeteer.launch(env.BROWSER);
+  let lastError: Error | null = null;
 
-  try {
-    const page = await browser.newPage();
-    await page.goto(url, { waitUntil: "networkidle0" });
+  for (let attempt = 1; attempt <= MAX_PDF_RETRIES; attempt++) {
+    const browser = await puppeteer.launch(env.BROWSER);
 
-    const pdf = await page.pdf({
-      format: "letter",
-      printBackground: true,
-      margin: { top: "0.5in", bottom: "0.5in", left: "0.5in", right: "0.5in" },
-    });
+    try {
+      const page = await browser.newPage();
 
-    return pdf;
-  } finally {
-    await browser.close();
+      // Set longer timeout for slow pages
+      page.setDefaultTimeout(60_000);
+      page.setDefaultNavigationTimeout(60_000);
+
+      // Use networkidle2 (allows 2 in-flight requests) - more forgiving than networkidle0
+      await page.goto(url, {
+        waitUntil: "networkidle2",
+        timeout: 60_000,
+      });
+
+      // Small delay to ensure page is fully rendered
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+
+      const pdf = await page.pdf({
+        format: "letter",
+        printBackground: true,
+        margin: {
+          top: "0.5in",
+          bottom: "0.5in",
+          left: "0.5in",
+          right: "0.5in",
+        },
+      });
+
+      return pdf;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      console.error(
+        `[Worker] PDF attempt ${attempt}/${MAX_PDF_RETRIES} failed: ${lastError.message}`
+      );
+
+      if (attempt < MAX_PDF_RETRIES) {
+        // Wait before retry
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+    } finally {
+      await browser.close();
+    }
   }
+
+  throw lastError ?? new Error("PDF generation failed after retries");
 }
 
 // =============================================================================

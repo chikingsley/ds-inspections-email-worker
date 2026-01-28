@@ -5,6 +5,7 @@ Manually upload a failed inspection PDF to SharePoint.
 ## When to use
 
 Use this when:
+
 - The automated worker failed to upload an inspection
 - User says "upload the inspection", "manually upload", or similar
 - User provides a failed inspection notification with contractor/project details
@@ -12,6 +13,7 @@ Use this when:
 ## Required information
 
 You need these 3 things from the user:
+
 1. **Report URL** - The ComplianceGo report URL (starts with `https://cdn3.compliancego.com/...`)
 2. **Contractor** - The contractor name (e.g., "BPR COMPANIES")
 3. **Project** - The project name (e.g., "PV LOT C3")
@@ -27,6 +29,7 @@ bun scripts/manual-upload.ts "<report-url>" "<contractor>" "<project>"
 ```
 
 Example:
+
 ```bash
 bun scripts/manual-upload.ts "https://cdn3.compliancego.com/s_xxx/insp/rpt/IR_BprCompanies-PvLotC3_26Jan26.html" "BPR COMPANIES" "PV LOT C3"
 ```

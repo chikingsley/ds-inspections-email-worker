@@ -273,15 +273,49 @@ async function processInspection(
 // PDF Generation (Browser Rendering)
 // =============================================================================
 
-const MAX_PDF_RETRIES = 3;
+const MAX_PDF_RETRIES = 5;
+
+/**
+ * Check if error is a rate limit or browser availability error
+ */
+function isRateLimitError(error: Error): boolean {
+  const msg = error.message.toLowerCase();
+  return (
+    msg.includes("429") ||
+    msg.includes("503") ||
+    msg.includes("rate limit") ||
+    msg.includes("no browser available")
+  );
+}
+
+/**
+ * Calculate exponential backoff delay
+ * Base: 3s, max: 60s, with jitter to prevent thundering herd
+ */
+function getBackoffDelay(attempt: number, isRateLimit: boolean): number {
+  // Longer base delay for rate limit errors
+  const baseDelay = isRateLimit ? 10_000 : 3_000;
+  const maxDelay = 60_000;
+
+  // Exponential backoff: base * 2^(attempt-1)
+  const exponentialDelay = baseDelay * Math.pow(2, attempt - 1);
+
+  // Add jitter (±20%) to prevent all retries hitting at same time
+  const jitter = exponentialDelay * 0.2 * (Math.random() * 2 - 1);
+
+  return Math.min(exponentialDelay + jitter, maxDelay);
+}
 
 async function generatePdf(env: Env, url: string): Promise<Uint8Array> {
   let lastError: Error | null = null;
+  let browser: Awaited<ReturnType<typeof puppeteer.launch>> | null = null;
 
   for (let attempt = 1; attempt <= MAX_PDF_RETRIES; attempt++) {
-    const browser = await puppeteer.launch(env.BROWSER);
-
     try {
+      // Browser launch is now inside try-catch to handle 503/429 errors
+      console.log(`[Worker] PDF attempt ${attempt}/${MAX_PDF_RETRIES} - launching browser...`);
+      browser = await puppeteer.launch(env.BROWSER);
+
       const page = await browser.newPage();
 
       // Set longer timeout for slow pages
@@ -308,19 +342,27 @@ async function generatePdf(env: Env, url: string): Promise<Uint8Array> {
         },
       });
 
+      console.log(`[Worker] PDF generated successfully on attempt ${attempt}`);
       return pdf;
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
+      const isRateLimit = isRateLimitError(lastError);
+
       console.error(
-        `[Worker] PDF attempt ${attempt}/${MAX_PDF_RETRIES} failed: ${lastError.message}`
+        `[Worker] PDF attempt ${attempt}/${MAX_PDF_RETRIES} failed: ${lastError.message}` +
+          (isRateLimit ? " (rate limit/availability error - will use longer backoff)" : "")
       );
 
       if (attempt < MAX_PDF_RETRIES) {
-        // Wait before retry
-        await new Promise((resolve) => setTimeout(resolve, 2000));
+        const delay = getBackoffDelay(attempt, isRateLimit);
+        console.log(`[Worker] Waiting ${Math.round(delay / 1000)}s before retry...`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
       }
     } finally {
-      await browser.close();
+      if (browser) {
+        await browser.close().catch(() => {}); // Ignore close errors
+        browser = null;
+      }
     }
   }
 

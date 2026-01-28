@@ -28,6 +28,7 @@ Go to Workers & Pages → inspection-router → Settings → Variables and Secre
 Deploys automatically when you push to `main`.
 
 Or manually:
+
 ```bash
 npm run deploy
 ```
@@ -35,6 +36,7 @@ npm run deploy
 ### 4. Configure Email Routing
 
 In Cloudflare Dashboard → Email → Email Routing:
+
 - Route emails from `support@compliancego.com` with subject "Inspection Report" → Worker `inspection-router`
 
 ## How It Works

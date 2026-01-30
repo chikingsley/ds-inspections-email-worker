@@ -135,8 +135,9 @@ export class SharePointClient {
    */
   async delete(itemPath: string): Promise<void> {
     const driveId = await this.getDefaultDriveId();
+    const encodedPath = this.encodePath(itemPath);
     const item = await this.client
-      .api(`/drives/${driveId}/root:/${itemPath}`)
+      .api(`/drives/${driveId}/root:/${encodedPath}`)
       .get();
 
     await this.deleteItem(driveId, item.id);
@@ -232,8 +233,9 @@ export class SharePointClient {
     driveId: string,
     folderPath: string
   ): Promise<SharePointItem[]> {
+    const encodedPath = this.encodePath(folderPath);
     const response = await this.client
-      .api(`/drives/${driveId}/root:/${folderPath}:/children`)
+      .api(`/drives/${driveId}/root:/${encodedPath}:/children`)
       .get();
     return (response.value ?? []).map((i: Record<string, unknown>) =>
       this.parseItem(i)
@@ -254,8 +256,9 @@ export class SharePointClient {
    * Download a file by path
    */
   async downloadFileByPath(driveId: string, filePath: string): Promise<Buffer> {
+    const encodedPath = this.encodePath(filePath);
     const response = await this.client
-      .api(`/drives/${driveId}/root:/${filePath}:/content`)
+      .api(`/drives/${driveId}/root:/${encodedPath}:/content`)
       .get();
     return this.responseToBuffer(response);
   }
@@ -313,7 +316,8 @@ export class SharePointClient {
   ): Promise<SharePointItem> {
     const isRoot = this.isRootPath(folderPath);
     const filePath = isRoot ? fileName : `${folderPath}/${fileName}`;
-    const apiPath = `/drives/${driveId}/root:/${filePath}:/content`;
+    const encodedPath = this.encodePath(filePath);
+    const apiPath = `/drives/${driveId}/root:/${encodedPath}:/content`;
 
     const response = await this.client.api(apiPath).put(content);
     return this.parseItem(response);
@@ -328,9 +332,10 @@ export class SharePointClient {
     folderName: string
   ): Promise<SharePointItem> {
     const isRoot = this.isRootPath(parentPath);
+    const encodedPath = this.encodePath(parentPath);
     const apiPath = isRoot
       ? `/drives/${driveId}/root/children`
-      : `/drives/${driveId}/root:/${parentPath}:/children`;
+      : `/drives/${driveId}/root:/${encodedPath}:/children`;
 
     const response = await this.client.api(apiPath).post({
       name: folderName,
@@ -343,6 +348,16 @@ export class SharePointClient {
 
   private isRootPath(path: string): boolean {
     return path === "/" || path === "";
+  }
+
+  /**
+   * URL encode each segment of a path to handle spaces and special characters
+   */
+  private encodePath(path: string): string {
+    return path
+      .split("/")
+      .map((segment) => encodeURIComponent(segment))
+      .join("/");
   }
 
   /**

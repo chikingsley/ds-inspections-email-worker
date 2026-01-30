@@ -1,56 +1,99 @@
-# Upload Inspection
+# Inspection Upload Management
 
-Manually upload a failed inspection PDF to SharePoint.
+Check and manually upload inspection PDFs to SharePoint.
 
 ## When to use
 
-Use this when:
+Use this skill when:
 
-- The automated worker failed to upload an inspection
-- User says "upload the inspection", "manually upload", or similar
-- User provides a failed inspection notification with contractor/project details
+- User asks to check if an inspection was uploaded
+- User says "check inspection", "was this uploaded", "verify upload"
+- User provides a ComplianceGo URL and asks to upload it
+- User mentions a failed inspection notification
+- User provides contractor/project details for verification
 
-## Required information
+## Workflow
 
-You need these 3 things from the user:
+### 1. Check if Inspection Exists
 
-1. **Report URL** - The ComplianceGo report URL (starts with `https://cdn3.compliancego.com/...`)
-2. **Contractor** - The contractor name (e.g., "BPR COMPANIES")
-3. **Project** - The project name (e.g., "PV LOT C3")
+First, verify if the inspection is already in SharePoint:
 
-If the user provides a failure notification email, extract these from it.
+```bash
+bun scripts/check-inspection.ts "<contractor>" "<project>" [date]
+```
 
-## How to run
+**Examples:**
 
-Run the script from the project root:
+```bash
+# Check today's inspection
+bun scripts/check-inspection.ts "ARCO" "KTEC PHX"
+
+# Check specific date
+bun scripts/check-inspection.ts "BPR COMPANIES" "PV LOT C3" "01.26.26"
+```
+
+**Exit codes:**
+- `0` = File exists
+- `1` = File not found (needs upload)
+
+### 2. Manual Upload (if needed)
+
+If the file doesn't exist, upload it:
 
 ```bash
 bun scripts/manual-upload.ts "<report-url>" "<contractor>" "<project>" [date]
 ```
 
-Example (uses today's date):
+**Examples:**
 
 ```bash
-bun scripts/manual-upload.ts "https://cdn3.compliancego.com/s_xxx/insp/rpt/IR_BprCompanies-PvLotC3_26Jan26.html" "BPR COMPANIES" "PV LOT C3"
+# Upload with today's date
+bun scripts/manual-upload.ts "https://cdn3.compliancego.com/..." "ARCO" "KTEC PHX"
+
+# Upload with specific date (for catch-up uploads)
+bun scripts/manual-upload.ts "https://cdn3.compliancego.com/..." "ARCO" "KTEC PHX" "01.29.26"
 ```
 
-Example with specific date (MM.DD.YY format):
+## Extracting Information
 
-```bash
-bun scripts/manual-upload.ts "https://cdn3.compliancego.com/s_xxx/insp/rpt/IR_BprCompanies-PvLotC3_26Jan26.html" "BPR COMPANIES" "PV LOT C3" "01.29.26"
+### From ComplianceGo Report URL
+
+The report page shows:
+- **Client Company** → Use as `contractor`
+- **Site Name** → Usually `CONTRACTOR - PROJECT` format, use the project part
+
+### From Failed Upload Notification
+
+The error email contains:
+- **CONTRACTOR** → Use directly
+- **PROJECT** → Use directly
+- **FILE** → Contains the date (e.g., `01.29.26.pdf`)
+
+### Site Name Format
+
+Sites should follow `CONTRACTOR - PROJECT` naming (space-dash-space). If a site doesn't parse correctly, it's likely a data entry issue in ComplianceGo.
+
+## SharePoint Path Structure
+
+Files are organized as:
+```text
+SWPPP/INSPECTIONS/PROJECTS/
+├── PROJECTS A-M/       # Contractors starting with 0-9 or A-M
+│   └── {CONTRACTOR}/
+│       └── {PROJECT}/
+│           └── {YEAR}/
+│               └── MM.DD.YY.pdf
+└── PROJECTS N-Z/       # Contractors starting with N-Z
+    └── ...
 ```
 
-## What it does
+## Troubleshooting
 
-1. Loads Azure credentials from `sharepoint-inspections-folders-sync/.env`
-2. Checks if file already exists in SharePoint
-3. Generates PDF from the ComplianceGo report URL using Puppeteer
-4. Uploads to the correct SharePoint folder based on contractor/project
-5. Returns the SharePoint URL on success
+### "Could not determine SharePoint folder path"
+The site name in ComplianceGo doesn't have a `-` separator. Ask the user to fix it in ComplianceGo to: `CONTRACTOR - PROJECT`
 
-## Notes
+### Wrong date on filename
+Use the optional date parameter: `"01.29.26"` (MM.DD.YY format)
 
-- By default, uses today's date for the filename (MM.DD.YY.pdf)
-- Optional 4th parameter allows specifying a date in MM.DD.YY format for catch-up uploads
-- Credentials are read from env vars, never hardcoded
-- If the file already exists, it exits without re-uploading
+### File already exists
+The script exits cleanly - no action needed.

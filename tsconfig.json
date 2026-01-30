@@ -4,15 +4,21 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "lib": ["ESNext"],
-    "types": ["@cloudflare/workers-types"],
+    "types": ["@cloudflare/workers-types", "bun-types"],
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
     "isolatedModules": true,
     "resolveJsonModule": true,
     "allowSyntheticDefaultImports": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"],
+      "@scripts/*": ["scripts/*"],
+      "@sharepoint/*": ["sharepoint-inspections-folders-sync/*"]
+    }
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "scripts/**/*", "sharepoint-inspections-folders-sync/**/*"],
   "exclude": ["node_modules"]
 }

@@ -1,111 +1,100 @@
----
-description: Use Bun instead of Node.js, npm, pnpm, or vite.
-globs: "*.ts, *.tsx, *.html, *.css, *.js, *.jsx, package.json"
-alwaysApply: false
----
+# DS Inspections Email Worker
 
-Default to using Bun instead of Node.js.
+Cloudflare Worker that receives ComplianceGo inspection emails, generates PDFs, and uploads to SharePoint.
 
-- Use `bun <file>` instead of `node <file>` or `ts-node <file>`
-- Use `bun test` instead of `jest` or `vitest`
-- Use `bun build <file.html|file.ts|file.css>` instead of `webpack` or `esbuild`
-- Use `bun install` instead of `npm install` or `yarn install` or `pnpm install`
-- Use `bun run <script>` instead of `npm run <script>` or `yarn run <script>` or `pnpm run <script>`
-- Use `bunx <package> <command>` instead of `npx <package> <command>`
-- Bun automatically loads .env, so don't use dotenv.
+## Project Overview
 
-## APIs
+- **Email**: `inspections@desertservices.app`
+- **Worker URL**: `inspection-router.cheez2012.workers.dev`
+- **SharePoint**: DataDrive site → Shared Documents → SWPPP/INSPECTIONS/PROJECTS/
 
-- `Bun.serve()` supports WebSockets, HTTPS, and routes. Don't use `express`.
-- `bun:sqlite` for SQLite. Don't use `better-sqlite3`.
-- `Bun.redis` for Redis. Don't use `ioredis`.
-- `Bun.sql` for Postgres. Don't use `pg` or `postgres.js`.
-- `WebSocket` is built-in. Don't use `ws`.
-- Prefer `Bun.file` over `node:fs`'s readFile/writeFile
-- Bun.$`ls` instead of execa.
+## Skills
 
-## Testing
+### Inspection Upload Management
+**Path**: `.claude/skills/upload-inspection/SKILL.md`
 
-Use `bun test` to run tests.
+Use when:
+- Checking if an inspection was uploaded
+- Manually uploading failed inspections
+- User provides ComplianceGo URLs or contractor/project details
 
-```ts#index.test.ts
-import { test, expect } from "bun:test";
+## Quick Commands
 
-test("hello world", () => {
-  expect(1).toBe(1);
-});
+```bash
+# Check if inspection exists
+bun scripts/check-inspection.ts "<contractor>" "<project>" [date]
+
+# Manual upload
+bun scripts/manual-upload.ts "<report-url>" "<contractor>" "<project>" [date]
+
+# Deploy worker
+bun run deploy
+
+# View worker logs
+bun run tail
 ```
 
-## Frontend
+## Architecture
 
-Use HTML imports with `Bun.serve()`. Don't use `vite`. HTML imports fully support React, CSS, Tailwind.
+```text
+src/
+├── index.ts          # Worker entry point (email handler, HTTP endpoints)
+└── parser.ts         # Email parsing, site name mapping
 
-Server:
+scripts/
+├── lib/              # Shared utilities
+│   ├── env.ts        # Environment loading
+│   ├── paths.ts      # SharePoint path building
+│   └── sharepoint.ts # SharePoint client helpers
+├── check-inspection.ts   # Verify upload exists
+└── manual-upload.ts      # Manual PDF upload
 
-```ts#index.ts
-import index from "./index.html"
-
-Bun.serve({
-  routes: {
-    "/": index,
-    "/api/users/:id": {
-      GET: (req) => {
-        return new Response(JSON.stringify({ id: req.params.id }));
-      },
-    },
-  },
-  // optional websocket support
-  websocket: {
-    open: (ws) => {
-      ws.send("Hello, world!");
-    },
-    message: (ws, message) => {
-      ws.send(message);
-    },
-    close: (ws) => {
-      // handle close
-    }
-  },
-  development: {
-    hmr: true,
-    console: true,
-  }
-})
+sharepoint-inspections-folders-sync/
+├── client.ts         # SharePointClient class (Graph API)
+└── .env              # Azure credentials (not in git)
 ```
 
-HTML files can import .tsx, .jsx or .js files directly and Bun's bundler will transpile & bundle automatically. `<link>` tags can point to stylesheets and Bun's CSS bundler will bundle.
+## Development
 
-```html#index.html
-<html>
-  <body>
-    <h1>Hello, world!</h1>
-    <script type="module" src="./frontend.tsx"></script>
-  </body>
-</html>
+### Stack
+- **Runtime**: Bun (scripts), Cloudflare Workers (production)
+- **PDF Generation**: Puppeteer (local), @cloudflare/puppeteer (worker)
+- **SharePoint**: Microsoft Graph API via Azure AD app
+
+### Path Aliases
+
+```typescript
+import { parseComplianceGoEmail } from "@/parser";
+import { buildInspectionPath } from "@scripts/lib";
+import { SharePointClient } from "@sharepoint/client";
 ```
 
-With the following `frontend.tsx`:
+### Environment
 
-```tsx#frontend.tsx
-import React from "react";
-import { createRoot } from "react-dom/client";
-
-// import .css files directly and it works
-import './index.css';
-
-const root = createRoot(document.body);
-
-export default function Frontend() {
-  return <h1>Hello, world!</h1>;
-}
-
-root.render(<Frontend />);
+Azure credentials in `sharepoint-inspections-folders-sync/.env`:
+```text
+AZURE_TENANT_ID=...
+AZURE_CLIENT_ID=...
+AZURE_CLIENT_SECRET=...
 ```
 
-Then, run index.ts
+Worker secrets configured via `wrangler secret put`.
 
-```sh
-bun --hot ./index.ts
-```
+## Common Issues
 
-For more information, read the Bun API docs in `node_modules/bun-types/docs/**.mdx`.
+### Upload fails with "JSON Content-Type" error
+Path contains spaces that aren't URL-encoded. Already fixed in worker and client.
+
+### "Could not determine SharePoint folder path"
+Site name in ComplianceGo missing separator. Should be: `CONTRACTOR - PROJECT`
+
+### Wrong date on manual upload
+Use 4th parameter: `bun scripts/manual-upload.ts "..." "CONTRACTOR" "PROJECT" "01.29.26"`
+
+## Bun Usage
+
+- Use `bun <file>` instead of `node` or `ts-node`
+- Use `bun test` for tests
+- Use `bun install` for dependencies
+- Use `Bun.file()` for file operations
+- Bun auto-loads `.env` files

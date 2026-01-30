@@ -1,46 +1,64 @@
 /**
  * Manual upload script for failed inspections
- * Uses the existing SharePointClient with credentials from .env
  *
- * Usage: bun scripts/manual-upload.ts <report-url> <contractor> <project> [date]
- * Example: bun scripts/manual-upload.ts "https://cdn3.compliancego.com/..." "BPR COMPANIES" "PV LOT C3"
- * Example with date: bun scripts/manual-upload.ts "https://cdn3.compliancego.com/..." "BPR COMPANIES" "PV LOT C3" "01.29.26"
+ * @description
+ * Generates a PDF from a ComplianceGo report URL and uploads it to SharePoint.
+ * Use this when the automated worker fails to upload an inspection.
+ *
+ * @usage
+ * ```bash
+ * bun scripts/manual-upload.ts "<report-url>" "<contractor>" "<project>" [date]
+ * ```
+ *
+ * @example
+ * ```bash
+ * # Upload with today's date
+ * bun scripts/manual-upload.ts "https://cdn3.compliancego.com/..." "ARCO" "KTEC PHX"
+ *
+ * # Upload with specific date
+ * bun scripts/manual-upload.ts "https://cdn3.compliancego.com/..." "ARCO" "KTEC PHX" "01.29.26"
+ * ```
+ *
+ * @module scripts/manual-upload
  */
 
 import puppeteer from "puppeteer";
-import { SharePointClient } from "../sharepoint-inspections-folders-sync/client";
+import { buildInspectionPath, fileExists, getSharePointClient } from "./lib";
 
-// Load env from the sync folder
-const envPath = "./sharepoint-inspections-folders-sync/.env";
-const envFile = Bun.file(envPath);
-if (await envFile.exists()) {
-  const envContent = await envFile.text();
-  for (const line of envContent.split("\n")) {
-    const trimmed = line.trim();
-    if (trimmed && !trimmed.startsWith("#")) {
-      const eqIndex = trimmed.indexOf("=");
-      if (eqIndex > 0) {
-        const key = trimmed.slice(0, eqIndex);
-        const value = trimmed.slice(eqIndex + 1);
-        process.env[key] = value;
-      }
-    }
-  }
+/** Chrome executable path on macOS */
+const CHROME_PATH =
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+
+/**
+ * Prints usage instructions and exits
+ */
+function printUsage(): never {
+  console.log(`
+Usage: bun scripts/manual-upload.ts "<report-url>" "<contractor>" "<project>" [date]
+
+Arguments:
+  report-url  ComplianceGo report URL (https://cdn3.compliancego.com/...)
+  contractor  Contractor name (e.g., "ARCO", "BPR COMPANIES")
+  project     Project name (e.g., "KTEC PHX", "PV LOT C3")
+  date        Optional. Date in MM.DD.YY format (defaults to today)
+
+Examples:
+  bun scripts/manual-upload.ts "https://cdn3.compliancego.com/..." "ARCO" "KTEC PHX"
+  bun scripts/manual-upload.ts "https://cdn3.compliancego.com/..." "BPR COMPANIES" "PV LOT C3" "01.26.26"
+`);
+  process.exit(1);
 }
 
-function getProjectsFolder(contractor: string): string {
-  const firstChar = contractor.charAt(0).toUpperCase();
-  const isNumberOrAtoM =
-    (firstChar >= "0" && firstChar <= "9") ||
-    (firstChar >= "A" && firstChar <= "M");
-  return isNumberOrAtoM ? "PROJECTS A-M" : "PROJECTS N-Z";
-}
-
+/**
+ * Generates a PDF from a ComplianceGo report URL using Puppeteer.
+ *
+ * @param url - ComplianceGo report URL
+ * @returns PDF content as Buffer
+ */
 async function generatePdf(url: string): Promise<Buffer> {
   console.log("Launching browser...");
   const browser = await puppeteer.launch({
-    executablePath:
-      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    executablePath: CHROME_PATH,
     headless: true,
   });
 
@@ -62,86 +80,50 @@ async function generatePdf(url: string): Promise<Buffer> {
   }
 }
 
-async function main() {
+/**
+ * Main entry point
+ */
+async function main(): Promise<void> {
   const reportUrl = process.argv[2];
   const contractor = process.argv[3];
   const project = process.argv[4];
-  const dateArg = process.argv[5]; // Optional: MM.DD.YY format
+  const dateArg = process.argv[5];
 
   if (!(reportUrl && contractor && project)) {
-    console.log(
-      "Usage: bun scripts/manual-upload.ts <report-url> <contractor> <project> [date]"
-    );
-    console.log(
-      'Example: bun scripts/manual-upload.ts "https://cdn3.compliancego.com/..." "BPR COMPANIES" "PV LOT C3"'
-    );
-    console.log(
-      'With date: bun scripts/manual-upload.ts "https://cdn3.compliancego.com/..." "BPR COMPANIES" "PV LOT C3" "01.29.26"'
-    );
-    process.exit(1);
+    printUsage();
   }
 
-  // Validate env vars
-  const { AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET } = process.env;
-  if (!(AZURE_TENANT_ID && AZURE_CLIENT_ID && AZURE_CLIENT_SECRET)) {
-    console.error("Missing Azure credentials in environment");
-    process.exit(1);
-  }
+  // Build the SharePoint path
+  const path = buildInspectionPath(contractor, project, dateArg);
 
-  let fileName: string;
-  let year: number;
-
-  if (dateArg && /^\d{2}\.\d{2}\.\d{2}$/.test(dateArg)) {
-    // Use provided date (MM.DD.YY format)
-    fileName = `${dateArg}.pdf`;
-    const yy = parseInt(dateArg.slice(-2), 10);
-    year = 2000 + yy;
-  } else {
-    // Default to today's date
-    const date = new Date();
-    const mm = String(date.getMonth() + 1).padStart(2, "0");
-    const dd = String(date.getDate()).padStart(2, "0");
-    const yy = String(date.getFullYear()).slice(-2);
-    fileName = `${mm}.${dd}.${yy}.pdf`;
-    year = date.getFullYear();
-  }
-
-  const folder = getProjectsFolder(contractor);
-  const folderPath = `SWPPP/INSPECTIONS/PROJECTS/${folder}/${contractor}/${project}/${year}`;
-
-  console.log(`\nUploading to: ${folderPath}/${fileName}`);
-
-  // Initialize SharePoint client
-  const client = new SharePointClient({
-    azureTenantId: AZURE_TENANT_ID,
-    azureClientId: AZURE_CLIENT_ID,
-    azureClientSecret: AZURE_CLIENT_SECRET,
-  });
+  console.log(`\nUploading to: ${path.fullPath}`);
 
   // Check if file already exists
-  try {
-    const existingFiles = await client.listFiles(folderPath);
-    const exists = existingFiles.some((f) => f.name === fileName);
-    if (exists) {
-      console.log("\n✅ File already exists in SharePoint!");
-      process.exit(0);
-    }
-  } catch {
-    // Folder might not exist yet, continue with upload
+  const exists = await fileExists(path.folderPath, path.fileName);
+  if (exists) {
+    console.log("\n✅ File already exists in SharePoint!");
+    process.exit(0);
   }
 
+  // Generate PDF
   console.log("\nGenerating PDF...");
   const pdfContent = await generatePdf(reportUrl);
   console.log(`PDF generated: ${pdfContent.length} bytes`);
 
+  // Upload to SharePoint
   console.log("\nUploading to SharePoint...");
-  const result = await client.upload(folderPath, fileName, pdfContent);
+  const client = await getSharePointClient();
+  const result = await client.upload(
+    path.folderPath,
+    path.fileName,
+    pdfContent
+  );
 
   console.log("\n✅ Uploaded successfully!");
   console.log(`URL: ${result.webUrl}`);
 }
 
 main().catch((err) => {
-  console.error("Error:", err);
+  console.error("Error:", err.message || err);
   process.exit(1);
 });

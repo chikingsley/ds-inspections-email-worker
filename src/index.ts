@@ -408,7 +408,12 @@ async function uploadToSharePoint(
     }
 
     const uploadPath = `${folderPath}/${fileName}`;
-    const uploadUrl = `https://graph.microsoft.com/v1.0/drives/${docDrive.id}/root:/${uploadPath}:/content`;
+    // URL encode each path segment to handle spaces and special characters
+    const encodedPath = uploadPath
+      .split("/")
+      .map((segment) => encodeURIComponent(segment))
+      .join("/");
+    const uploadUrl = `https://graph.microsoft.com/v1.0/drives/${docDrive.id}/root:/${encodedPath}:/content`;
 
     const uploadRes = await fetch(uploadUrl, {
       method: "PUT",

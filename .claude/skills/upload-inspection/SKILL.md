@@ -25,13 +25,19 @@ If the user provides a failure notification email, extract these from it.
 Run the script from the project root:
 
 ```bash
-bun scripts/manual-upload.ts "<report-url>" "<contractor>" "<project>"
+bun scripts/manual-upload.ts "<report-url>" "<contractor>" "<project>" [date]
 ```
 
-Example:
+Example (uses today's date):
 
 ```bash
 bun scripts/manual-upload.ts "https://cdn3.compliancego.com/s_xxx/insp/rpt/IR_BprCompanies-PvLotC3_26Jan26.html" "BPR COMPANIES" "PV LOT C3"
+```
+
+Example with specific date (MM.DD.YY format):
+
+```bash
+bun scripts/manual-upload.ts "https://cdn3.compliancego.com/s_xxx/insp/rpt/IR_BprCompanies-PvLotC3_26Jan26.html" "BPR COMPANIES" "PV LOT C3" "01.29.26"
 ```
 
 ## What it does
@@ -44,6 +50,7 @@ bun scripts/manual-upload.ts "https://cdn3.compliancego.com/s_xxx/insp/rpt/IR_Bp
 
 ## Notes
 
-- The script uses today's date for the filename (MM.DD.YY.pdf)
+- By default, uses today's date for the filename (MM.DD.YY.pdf)
+- Optional 4th parameter allows specifying a date in MM.DD.YY format for catch-up uploads
 - Credentials are read from env vars, never hardcoded
 - If the file already exists, it exits without re-uploading

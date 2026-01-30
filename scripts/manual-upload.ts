@@ -2,8 +2,9 @@
  * Manual upload script for failed inspections
  * Uses the existing SharePointClient with credentials from .env
  *
- * Usage: bun scripts/manual-upload.ts <report-url> <contractor> <project>
+ * Usage: bun scripts/manual-upload.ts <report-url> <contractor> <project> [date]
  * Example: bun scripts/manual-upload.ts "https://cdn3.compliancego.com/..." "BPR COMPANIES" "PV LOT C3"
+ * Example with date: bun scripts/manual-upload.ts "https://cdn3.compliancego.com/..." "BPR COMPANIES" "PV LOT C3" "01.29.26"
  */
 
 import puppeteer from "puppeteer";
@@ -65,13 +66,17 @@ async function main() {
   const reportUrl = process.argv[2];
   const contractor = process.argv[3];
   const project = process.argv[4];
+  const dateArg = process.argv[5]; // Optional: MM.DD.YY format
 
   if (!(reportUrl && contractor && project)) {
     console.log(
-      "Usage: bun scripts/manual-upload.ts <report-url> <contractor> <project>"
+      "Usage: bun scripts/manual-upload.ts <report-url> <contractor> <project> [date]"
     );
     console.log(
       'Example: bun scripts/manual-upload.ts "https://cdn3.compliancego.com/..." "BPR COMPANIES" "PV LOT C3"'
+    );
+    console.log(
+      'With date: bun scripts/manual-upload.ts "https://cdn3.compliancego.com/..." "BPR COMPANIES" "PV LOT C3" "01.29.26"'
     );
     process.exit(1);
   }
@@ -83,12 +88,23 @@ async function main() {
     process.exit(1);
   }
 
-  const year = new Date().getFullYear();
-  const date = new Date();
-  const mm = String(date.getMonth() + 1).padStart(2, "0");
-  const dd = String(date.getDate()).padStart(2, "0");
-  const yy = String(date.getFullYear()).slice(-2);
-  const fileName = `${mm}.${dd}.${yy}.pdf`;
+  let fileName: string;
+  let year: number;
+
+  if (dateArg && /^\d{2}\.\d{2}\.\d{2}$/.test(dateArg)) {
+    // Use provided date (MM.DD.YY format)
+    fileName = `${dateArg}.pdf`;
+    const yy = parseInt(dateArg.slice(-2), 10);
+    year = 2000 + yy;
+  } else {
+    // Default to today's date
+    const date = new Date();
+    const mm = String(date.getMonth() + 1).padStart(2, "0");
+    const dd = String(date.getDate()).padStart(2, "0");
+    const yy = String(date.getFullYear()).slice(-2);
+    fileName = `${mm}.${dd}.${yy}.pdf`;
+    year = date.getFullYear();
+  }
 
   const folder = getProjectsFolder(contractor);
   const folderPath = `SWPPP/INSPECTIONS/PROJECTS/${folder}/${contractor}/${project}/${year}`;
